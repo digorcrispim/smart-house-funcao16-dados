@@ -157,13 +157,16 @@ def app_render(pagina, k):
         quadro.get_by_role('tab', name=tab, exact=True).click(timeout=15000)
         quadro.get_by_role('heading', name=titulo, exact=True).wait_for(state='visible', timeout=15000)
     quadro.get_by_role('tab', name='Registros', exact=True).click()
-    if k in ('financeira','orcamentaria','fisica'):
+    if k == 'fisica':
+        quadro.get_by_role('heading', name='Situação de cada intervenção').wait_for(state='visible')
+        cartao = quadro.locator('.numcard').filter(has_text='Intervenções distintas')
+        exigir(cartao.locator('strong').inner_text() == '221', 'Quantidade de intervenções divergente.')
+    if k in ('financeira','orcamentaria'):
         detalhes = quadro.locator('details').filter(has_text='Consulta ao SQLite').first
         detalhes.locator('summary').click(timeout=10000)
         marcadores = {
             'financeira': ['476', '555.205.746,39'],
             'orcamentaria': ['321', '2.393.369.118,98'],
-            'fisica': ['221', '46'],
         }
         texto = detalhes.inner_text(timeout=10000)
         exigir(all(v in texto for v in marcadores[k]), 'Indicadores exibidos divergem do controle.')
@@ -196,19 +199,25 @@ def link_relatorio(q):
         endereco = limpo(item['url'])
         p = url.urlsplit(endereco)
         if (p.scheme == 'https' and p.hostname in {'datastudio.google.com', 'lookerstudio.google.com'}
-                and re.match(r'^/(?:embed/)?reporting/[a-zA-Z0-9-]+(?:/|$)', p.path)):
+                and re.match(r'^/(?:u/\d+/)?(?:embed/)?reporting/[a-zA-Z0-9-]+(?:/|$)', p.path)):
             return endereco
+
+
+def destino_investigar(endereco, k):
+    args = url.parse_qs(url.urlsplit(endereco).query)
+    return (endereco.startswith(PRODUCAO) and args.get('trajetoria') == [k]
+            and args.get('contrato') == [contexto(k)] and args.get('nivel') == ['fichas']
+            and (k != 'orcamentaria' or args.get('ano') == ['2026']))
 
 
 def botao_investigar(q, k):
-    for item in links(q):
-        endereco = limpo(item['url'])
-        p = url.urlsplit(endereco)
-        args = url.parse_qs(p.query)
-        if (endereco.startswith(PRODUCAO) and args.get('trajetoria') == [k]
-                and args.get('contrato') == [contexto(k)] and args.get('nivel') == ['fichas']
-                and (k != 'orcamentaria' or args.get('ano') == ['2026'])):
-            return endereco
+    for item in q.locator('a[href]').all():
+        if item.is_visible() and destino_investigar(limpo(item.get_attribute('href') or ''), k):
+            return item
+    rotulo = q.get_by_text(re.compile(r'^Investigar(?:\s|$)', re.I))
+    for candidato in rotulo.all():
+        if candidato.is_visible():
+            return candidato
 
 
 def portal_e_relatorios(pagina, k, relatorios):
@@ -219,9 +228,16 @@ def portal_e_relatorios(pagina, k, relatorios):
     if not relatorios:
         return
     carregar(pagina, relatorio)
-    alvo = aguardar(pagina, lambda q: botao_investigar(q, k), 'Relatório sem ligação pública Investigar resolvida.', 40)
-    carregar(pagina, alvo)
-    app_render(pagina, k)
+    botao = aguardar(pagina, lambda q: botao_investigar(q, k), 'Botão Investigar ausente no relatório público.', 40)
+    botao.click(timeout=10000)
+    fim = time.monotonic() + 30
+    while time.monotonic() < fim:
+        for aba in pagina.context.pages:
+            if destino_investigar(aba.url, k):
+                app_render(aba, k)
+                return
+        pagina.wait_for_timeout(350)
+    raise Falha('O botão Investigar não abriu o contexto de referência.')
 
 
 def navegacao(testar_app, testar_portal, testar_relatorios):
