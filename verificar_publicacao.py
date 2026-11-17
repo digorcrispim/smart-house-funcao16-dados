@@ -348,15 +348,18 @@ def sessoes_e_ficha(navegador):
 def navegacao(testar_app, testar_portal, testar_relatorios):
     from playwright.sync_api import sync_playwright
     falhas = []
+    selecionada = os.getenv('TRAJETORIA', 'todas') or 'todas'
+    exigir(selecionada == 'todas' or selecionada in ROTAS, 'Trajetória desconhecida.')
+    trilhas = ROTAS if selecionada == 'todas' else [selecionada]
     with sync_playwright() as pw, pw.chromium.launch(channel='chrome', headless=True) as navegador:
-        if testar_app:
+        if testar_app and selecionada == 'todas':
             try:
                 sessoes_e_ficha(navegador)
             except Exception as exc:
                 erro = str(exc) if isinstance(exc, Falha) else type(exc).__name__
                 log(f'Sessões concorrentes, URL direta, Voltar e busca vazia · falhou ({erro}).')
                 falhas.append('sessoes')
-        if testar_portal or testar_relatorios:
+        if (testar_portal or testar_relatorios) and selecionada == 'todas':
             ctx = navegador.new_context(locale='pt-BR', viewport={'width':1360,'height':900})
             try:
                 validar_inicio(ctx.new_page())
@@ -367,7 +370,7 @@ def navegacao(testar_app, testar_portal, testar_relatorios):
                 falhas.append('inicio')
             finally:
                 ctx.close()
-        for k in ROTAS:
+        for k in trilhas:
             for nome, ligado in [('Aplicativo', testar_app), ('Portal e relatórios' if testar_relatorios else 'Portal', testar_portal or testar_relatorios)]:
                 if not ligado:
                     continue
