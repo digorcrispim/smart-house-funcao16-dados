@@ -217,7 +217,7 @@ def destino_investigar(endereco, k):
 
 
 def botao_investigar(q, k):
-    for item in q.locator('a[href]').all():
+    for item in q.get_by_role('link', name='Investigar', exact=True).all():
         if item.is_visible() and destino_investigar(limpo(item.get_attribute('href') or ''), k):
             return item
     rotulo = q.get_by_text(re.compile(r'^Investigar(?:\s|$)', re.I))
@@ -318,21 +318,40 @@ def portal_e_relatorios(pagina, k, relatorios):
     aguardar(pagina, lambda q: dados_relatorio(q, k), 'Dados ausentes no relatório aberto diretamente.', 40)
     log(f'Relatório · {ROTAS[k]} · cabeçalho e células de dados conferidos na abertura direta sem conta.')
     botao = aguardar(pagina, lambda q: botao_investigar(q, k), 'Botão Investigar ausente no relatório público.', 40)
+    confirmado = destino_investigar(limpo(botao.get_attribute('href') or ''), k)
+    log(f'Investigar · {ROTAS[k]} · destino HTML conferido: {"sim" if confirmado else "rótulo clicável"}.')
+    original = pagina.url
     botao.click(timeout=10000)
-    fim = time.monotonic() + 30
+    fim = time.monotonic() + 40
+    vistos = set()
     while time.monotonic() < fim:
         for aba in pagina.context.pages:
+            if aba.is_closed():
+                continue
             atual = url.urlsplit(aba.url)
-            if atual.hostname == 'www.google.com' and atual.path == '/url' and destino_investigar(limpo(aba.url), k):
-                for link in aba.get_by_role('link').all():
-                    href = link.get_attribute('href') or ''
-                    if destino_investigar(href, k) and link.is_visible():
-                        link.click(timeout=10000)
-                        log(f'Investigar · {ROTAS[k]} · seguido o link para o contexto correto no aviso de redirecionamento do Google.')
-                        break
+            host = atual.hostname or atual.scheme
+            familia = (atual.path.split('/')[1:2] or [''])[0]
+            if familia not in {'url','redirect','reporting','embed','u','signin','-',''}:
+                familia = 'outra'
+            classe = host if host in {'www.google.com','google.com','datastudio.google.com','lookerstudio.google.com','accounts.google.com','share.streamlit.io','smart-house-funcao16-pmsp.streamlit.app','about','chrome-error'} else 'outro'
+            achado = (classe, familia, len(pagina.context.pages))
+            if achado not in vistos:
+                log(f'Investigar · {ROTAS[k]} · {achado[2]} aba(s), destino {classe}, etapa {familia or "inicial"}.')
+                vistos.add(achado)
             if destino_investigar(aba.url, k):
                 app_render(aba, k)
                 return
+            # O Looker pode abrir um aviso em uma nova aba. Somente o destino exato da trajetória é seguido.
+            if aba is pagina and aba.url == original:
+                continue
+            if host not in {'www.google.com', 'google.com', 'www.google.com.br','datastudio.google.com','lookerstudio.google.com'}:
+                continue
+            for link in aba.get_by_role('link').all():
+                href = link.get_attribute('href') or ''
+                if destino_investigar(href, k) and link.is_visible():
+                    link.click(timeout=10000)
+                    log(f'Investigar · {ROTAS[k]} · seguido o link do aviso para o contexto de referência.')
+                    break
         pagina.wait_for_timeout(350)
     raise Falha('O botão Investigar não abriu o contexto de referência.')
 
