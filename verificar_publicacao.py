@@ -519,7 +519,7 @@ def modalidade_urbanizacao(navegador):
         exigir(len(obj['entregas'])==1 and obj['contexto']['subid']=='1148.101.100-u','Exportação perdeu o recorte.')
         exigir(obj['financeiro_global']['pago']==33082771440,'Exportação rateou o pagamento.')
         log('Sub-ID Violetas · valores próprios, fonte/linha, pagamento não individualizado e exportação JSON conferidos; total contratual preservado.')
-        for nome,titulo in [('Carteira de urbanização','Intervenções e instrumentos'),('Custos territoriais','Cenários territoriais V4.6'),('História da implementação','Atos e acontecimentos com data')]:
+        for nome,titulo in [('Carteira histórica','Intervenções e instrumentos'),('Custos territoriais','Cenários territoriais V4.6'),('História da implementação','Atos e acontecimentos com data')]:
             q.get_by_role('button',name=nome,exact=True).click()
             q.get_by_role('heading',name=titulo,exact=True).wait_for(state='visible')
         log('Quatro perspectivas · carteira, custos, território e história renderizaram com o mesmo contexto.')
