@@ -247,6 +247,24 @@ def validar_inicio(pagina):
     aguardar(pagina, encontrar, 'O aplicativo incorporado não exibiu o contrato-piloto e os seis cartões.', 55)
 
 
+ROTULOS = {
+    'institucional': ('tipo', r'intervenção'), 'financeira': ('ano_origem', r'^20[12]\d$'),
+    'orcamentaria': ('Exercício', r'^20[12]\d$'), 'juridica': ('tipo', r'instrumento aditivo'),
+    'territorial': ('qualificacao', r'atribuição territorial|localização comprovada'),
+    'fisica': ('obra', r'em andamento'),
+}
+
+
+def dados_relatorio(quadro, k):
+    if url.urlsplit(quadro.url).hostname not in {'datastudio.google.com','lookerstudio.google.com'}:
+        return False
+    rotulo, dado = ROTULOS[k]
+    cabecalho = quadro.get_by_text(rotulo, exact=True)
+    celulas = quadro.locator('.row .cell-value').filter(has_text=re.compile(dado, re.I))
+    return bool(cabecalho.count() and cabecalho.first.is_visible() and
+                celulas.count() and celulas.first.is_visible())
+
+
 def portal_e_relatorios(pagina, k, relatorios):
     carregar(pagina, PORTAL + 'in%C3%ADcio')
     destino = aguardar(pagina, lambda q: link_portal(q, k), 'Trajetória ausente no portal.', 20)
@@ -254,7 +272,14 @@ def portal_e_relatorios(pagina, k, relatorios):
     relatorio = aguardar(pagina, link_relatorio, 'Referência ao relatório ausente no portal.', 25)
     if not relatorios:
         return
-    carregar(pagina, relatorio)
+    for elemento in pagina.locator('iframe').all():
+        if elemento.is_visible():
+            elemento.scroll_into_view_if_needed(timeout=5000)
+    aguardar(pagina, lambda q: dados_relatorio(q, k), 'Tabela incorporada sem cabeçalho e dados verificáveis.', 50)
+    log(f'Relatório · {ROTAS[k]} · cabeçalho e células de dados conferidos no iframe do portal.')
+    direto = url.urlsplit(relatorio)
+    carregar(pagina, direto._replace(path=direto.path.replace('/embed/reporting/', '/reporting/')).geturl())
+    aguardar(pagina, lambda q: dados_relatorio(q, k), 'Dados ausentes no relatório aberto diretamente.', 40)
     botao = aguardar(pagina, lambda q: botao_investigar(q, k), 'Botão Investigar ausente no relatório público.', 40)
     botao.click(timeout=10000)
     fim = time.monotonic() + 30
