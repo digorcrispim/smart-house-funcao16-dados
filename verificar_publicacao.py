@@ -504,10 +504,10 @@ def modalidade_urbanizacao(navegador):
         texto=q.locator('body').inner_text()
         exigir(all(x in texto for x in ['330.827.714,40','45.069.065,49','169 notas únicas']), 'Valores globais 037 divergentes.')
         for i in range(100,106):
-            exigir('1148.'+str(i)+'.100-u' in texto,'Sub-ID 037 ausente.')
+            exigir('1148.100.'+str(i)+'-u' in texto,'Sub-ID 037 ausente.')
         log('Urbanização 037 · contrato global, 169 notas, R$ 330.827.714,40 e diferença pendente de R$ 45.069.065,49; seis sub-IDs presentes.')
-        q.get_by_role('combobox',name='Sub-ID',exact=True).select_option('1148.101.100-u')
-        q.get_by_role('button',name='Violetas',exact=True).click()
+        q.get_by_role('combobox',name='Sub-ID',exact=True).select_option('1148.100.101-u')
+        q.get_by_role('button',name='LOTEAMENTO PARQUE DAS FLORES/JD CONTINENTAL/COHAB - NÚCLEO DAS VIOLETAS',exact=True).click()
         dlg=q.get_by_role('dialog')
         dlg.get_by_role('heading',name='Valores próprios deste registro').wait_for(state='visible')
         exigir('Pagamento oficial individualizado: não demonstrado' in dlg.inner_text(),'Alcance do pagamento não preservado.')
@@ -516,7 +516,7 @@ def modalidade_urbanizacao(navegador):
         with pagina.expect_download() as down:
             q.get_by_role('button',name='Exportar recorte',exact=True).click()
         obj=json.loads(Path(down.value.path()).read_text())
-        exigir(len(obj['entregas'])==1 and obj['contexto']['subid']=='1148.101.100-u','Exportação perdeu o recorte.')
+        exigir(len(obj['entregas'])==1 and obj['contexto']['subid']=='1148.100.101-u','Exportação perdeu o recorte.')
         exigir(obj['financeiro_global']['pago']==33082771440,'Exportação rateou o pagamento.')
         log('Sub-ID Violetas · valores próprios, fonte/linha, pagamento não individualizado e exportação JSON conferidos; total contratual preservado.')
         for nome,titulo in [('Carteira histórica','Intervenções e instrumentos'),('Custos territoriais','Cenários territoriais V4.6'),('História da implementação','Atos e acontecimentos com data')]:
@@ -525,7 +525,7 @@ def modalidade_urbanizacao(navegador):
         log('Quatro perspectivas · carteira, custos, território e história renderizaram com o mesmo contexto.')
         q.locator('.urbtrail').get_by_role('button',name='Física',exact=True).click()
         q.get_by_role('heading',name='Situação de cada intervenção',exact=True).wait_for(state='visible')
-        exigir('1148.101.100-u' in pagina.url and 'GI%3A98' in pagina.url,'Trajetória não conservou sub-ID/contrato.')
+        exigir('1148.100.101-u' in pagina.url and 'GI%3A98' in pagina.url,'Trajetória não conservou sub-ID/contrato.')
         log('Troca para trajetória Física preservou contrato e sub-ID na URL.')
         q.get_by_role('button',name='Caderno de análise',exact=True).click()
         d=q.get_by_role('dialog')
