@@ -10,6 +10,18 @@ on:
         description: SHA-256 fixado do PUBLICO.json da edição v2026.11.16.3
         type: string
         default: bf5008688e6a046b551779022623f12f78e800e6933437062a13342056caae05
+      trajetoria:
+        description: Trajetória para diagnóstico, ou todas
+        type: choice
+        default: todas
+        options:
+          - todas
+          - institucional
+          - financeira
+          - orcamentaria
+          - juridica
+          - territorial
+          - fisica
       sqlite:
         description: Download anônimo, hashes e controles SQL
         type: boolean
@@ -40,6 +52,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check playwright==1.55.0
       - name: Executar controles selecionados
         env:
+          TRAJETORIA: ${{ inputs.trajetoria }}
           APP_URL: ${{ inputs.app_url }}
           MANIFESTO_SHA256: ${{ inputs.manifesto_sha256 }}
           SQLITE: ${{ inputs.sqlite }}
