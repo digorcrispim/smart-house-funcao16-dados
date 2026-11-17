@@ -13,7 +13,7 @@ import urllib.parse as url
 import urllib.request as http
 from contextlib import closing
 
-VERSAO = 'v2026.11.16.3'
+VERSAO = 'v2026.11.17.1'
 RELEASE = f'https://github.com/digorcrispim/smart-house-funcao16-dados/releases/download/{VERSAO}/'
 PORTAL = 'https://sites.google.com/view/smart-house-funcao16-pmsp/'
 PRODUCAO = 'https://smart-house-funcao16-pmsp.streamlit.app/'
@@ -57,7 +57,7 @@ def log(texto):
 def conferir_banco(arquivo):
     with closing(sqlite3.connect(arquivo.resolve().as_uri() + '?mode=ro&immutable=1', uri=True)) as banco:
         exigir(banco.execute('PRAGMA quick_check').fetchall() == [('ok',)], 'Integridade SQLite divergente.')
-        exigir(banco.execute('PRAGMA user_version').fetchone() == (1,), 'Versão de esquema divergente.')
+        exigir(banco.execute('PRAGMA user_version').fetchone() == (2,), 'Versão de esquema divergente.')
         for nome, (consulta, esperado) in zip(('financeiro', 'físico', 'orçamentário'), CONTROLES):
             exigir(banco.execute(consulta).fetchone() == esperado, f'Controle {nome} divergente.')
 
@@ -491,6 +491,57 @@ def sessoes_e_ficha(navegador):
         ctx_b.close()
 
 
+
+def modalidade_urbanizacao(navegador):
+    ctx=navegador.new_context(locale='pt-BR',viewport={'width':1440,'height':1000},accept_downloads=True)
+    try:
+        pagina=ctx.new_page()
+        carregar(pagina,endereco_app()+'?trajetoria=modalidades&modalidade=urbanizacao&contrato=GI%3A98&urb_vista=custos&nivel=fichas')
+        def achar(q):
+            e=q.get_by_role('heading',name='Visão global do contrato',exact=True)
+            return q if e.count() and e.is_visible() else None
+        q=aguardar(pagina,achar,'Urbanização não carregou.',segundos=90)
+        texto=q.locator('body').inner_text()
+        exigir(all(x in texto for x in ['330.827.714,40','45.069.065,49','169 notas únicas']), 'Valores globais 037 divergentes.')
+        for i in range(100,106):
+            exigir('1148.'+str(i)+'.100-u' in texto,'Sub-ID 037 ausente.')
+        log('Urbanização 037 · contrato global, 169 notas, R$ 330.827.714,40 e diferença pendente de R$ 45.069.065,49; seis sub-IDs presentes.')
+        q.get_by_role('combobox',name='Sub-ID',exact=True).select_option('1148.101.100-u')
+        q.get_by_role('button',name='Violetas',exact=True).click()
+        dlg=q.get_by_role('dialog')
+        dlg.get_by_role('heading',name='Valores próprios deste registro').wait_for(state='visible')
+        exigir('Pagamento oficial individualizado: não demonstrado' in dlg.inner_text(),'Alcance do pagamento não preservado.')
+        exigir('CONSOLIDADA URBANIZAÇÃO' in dlg.inner_text(),'Origem da GI ausente.')
+        q.get_by_role('button',name='Fechar',exact=True).click()
+        with pagina.expect_download() as down:
+            q.get_by_role('button',name='Exportar recorte',exact=True).click()
+        obj=json.loads(Path(down.value.path()).read_text())
+        exigir(len(obj['entregas'])==1 and obj['contexto']['subid']=='1148.101.100-u','Exportação perdeu o recorte.')
+        exigir(obj['financeiro_global']['pago']==33082771440,'Exportação rateou o pagamento.')
+        log('Sub-ID Violetas · valores próprios, fonte/linha, pagamento não individualizado e exportação JSON conferidos; total contratual preservado.')
+        for nome,titulo in [('Carteira de urbanização','Intervenções e instrumentos'),('Custos territoriais','Cenários territoriais V4.6'),('História da implementação','Atos e acontecimentos com data')]:
+            q.get_by_role('button',name=nome,exact=True).click()
+            q.get_by_role('heading',name=titulo,exact=True).wait_for(state='visible')
+        log('Quatro perspectivas · carteira, custos, território e história renderizaram com o mesmo contexto.')
+        q.locator('.urbtrail').get_by_role('button',name='Física',exact=True).click()
+        q.get_by_role('heading',name='Situação de cada intervenção',exact=True).wait_for(state='visible')
+        exigir('1148.101.100-u' in pagina.url and 'GI%3A98' in pagina.url,'Trajetória não conservou sub-ID/contrato.')
+        log('Troca para trajetória Física preservou contrato e sub-ID na URL.')
+        q.get_by_role('button',name='Caderno de análise',exact=True).click()
+        d=q.get_by_role('dialog')
+        for campo,valor in [('Responsável','Homologação automatizada'),('Versão da análise','teste-temporario'),('Fonte ou documento','GI 2608'),('Localizador','CONSOLIDADA URBANIZAÇÃO'),('Descrição','Registro temporário no navegador anônimo; não altera base-fonte.')]:
+            d.get_by_label(campo,exact=True).fill(valor)
+        d.get_by_role('button',name='Registrar no caderno',exact=True).click()
+        with pagina.expect_download() as down:
+            d.get_by_role('button',name='Exportar caderno',exact=True).click()
+        journal=json.loads(Path(down.value.path()).read_text())
+        exigir(len(journal['registros'])==1,'Caderno não conservou registro.')
+        exigir(journal['registros'][0]['versao_base']==VERSAO,'Caderno não conservou a versão da base.')
+        log('Caderno local · evidência registrada e exportada com contexto e versão; sessão descartada ao final.')
+    finally:
+        ctx.close()
+
+
 def navegacao(testar_app, testar_portal, testar_relatorios):
     from playwright.sync_api import sync_playwright
     falhas = []
@@ -498,6 +549,12 @@ def navegacao(testar_app, testar_portal, testar_relatorios):
     exigir(selecionada == 'todas' or selecionada in ROTAS, 'Trajetória desconhecida.')
     trilhas = ROTAS if selecionada == 'todas' else [selecionada]
     with sync_playwright() as pw, pw.chromium.launch(channel='chrome', headless=True) as navegador:
+        if testar_app and selecionada == 'todas':
+            try:
+                modalidade_urbanizacao(navegador)
+            except Exception as exc:
+                log('Urbanização · falhou ('+str(exc)+').')
+                falhas.append('urbanizacao')
         if testar_app and selecionada == 'todas':
             try:
                 sessoes_e_ficha(navegador)
