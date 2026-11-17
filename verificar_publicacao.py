@@ -222,6 +222,31 @@ def botao_investigar(q, k):
             return candidato
 
 
+def validar_inicio(pagina):
+    carregar(pagina, PORTAL + 'in%C3%ADcio')
+    for elemento in pagina.locator('iframe').all():
+        if elemento.is_visible():
+            elemento.scroll_into_view_if_needed(timeout=5000)
+
+    def encontrar(quadro):
+        if quadro == pagina.main_frame or not quadro.url.startswith(PRODUCAO):
+            return False
+        titulo = quadro.locator('.hero h2')
+        if not titulo.count() or not titulo.first.is_visible():
+            return False
+        if '028/2012' not in titulo.first.inner_text() or not quadro.get_by_text('GI:187', exact=True).count():
+            return False
+        urls = quadro.locator('a.trajcard').evaluate_all('(els) => els.filter(e => e.getClientRects().length).map(e => e.href)')
+        rotas = set()
+        for endereco in urls:
+            args = url.parse_qs(url.urlsplit(endereco).query)
+            if endereco.startswith(PRODUCAO) and args.get('contrato') == ['GI:187']:
+                rotas.update(args.get('trajetoria', []))
+        return rotas == set(ROTAS)
+
+    aguardar(pagina, encontrar, 'O aplicativo incorporado não exibiu o contrato-piloto e os seis cartões.', 55)
+
+
 def portal_e_relatorios(pagina, k, relatorios):
     carregar(pagina, PORTAL + 'in%C3%ADcio')
     destino = aguardar(pagina, lambda q: link_portal(q, k), 'Trajetória ausente no portal.', 20)
@@ -246,6 +271,17 @@ def navegacao(testar_app, testar_portal, testar_relatorios):
     from playwright.sync_api import sync_playwright
     falhas = []
     with sync_playwright() as pw, pw.chromium.launch(channel='chrome', headless=True) as navegador:
+        if testar_portal or testar_relatorios:
+            ctx = navegador.new_context(locale='pt-BR', viewport={'width':1360,'height':900})
+            try:
+                validar_inicio(ctx.new_page())
+                log('Portal · início · o iframe exibiu SEHAB 028/2012 (GI:187) e os seis cartões com links de trajetória.')
+            except Exception as exc:
+                erro = str(exc) if isinstance(exc, Falha) else type(exc).__name__
+                log(f'Portal · início · falhou ({erro}).')
+                falhas.append('inicio')
+            finally:
+                ctx.close()
         for k in ROTAS:
             for nome, ligado in [('Aplicativo', testar_app), ('Portal e relatórios' if testar_relatorios else 'Portal', testar_portal or testar_relatorios)]:
                 if not ligado:
