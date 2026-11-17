@@ -259,14 +259,44 @@ ROTULOS = {
 }
 
 
+LINHAS_RELATORIOS = {
+    'financeira': {'2026': ('117', '98.270.629,22', '98.270.629,22')},
+    'orcamentaria': {'2026': ('321', '2.393.369.118,98')},
+    'territorial': {
+        'Atribuição territorial estimada': ('1518',), 'Localização comprovada': ('660',),
+        'Vínculo candidato': ('20',),
+    },
+    'fisica': {'E03 - EM ANDAMENTO': ('62',), 'E04 - CONTRATADA E NÃO INICIADA': ('60',),
+               'E01 - CONCLUÍDA': ('21',)},
+}
+
+
+def valor_celula(texto):
+    return ' '.join(texto.replace('R$', '').replace('.', '').split()).casefold()
+
+
 def dados_relatorio(quadro, k):
     if url.urlsplit(quadro.url).hostname not in {'datastudio.google.com','lookerstudio.google.com'}:
         return False
     rotulo, dado = ROTULOS[k]
     cabecalho = quadro.get_by_text(rotulo, exact=True)
     celulas = quadro.locator('.row .cell-value').filter(has_text=re.compile(dado, re.I))
-    return bool(cabecalho.count() and cabecalho.first.is_visible() and
-                celulas.count() and celulas.first.is_visible())
+    if not (cabecalho.count() and cabecalho.first.is_visible() and celulas.count() and celulas.first.is_visible()):
+        return False
+    if k not in LINHAS_RELATORIOS:
+        return True
+    linhas = quadro.locator('.row').evaluate_all('''rows => rows.filter(row => !row.querySelector('.row')).map(row =>
+        Array.from(row.querySelectorAll('.cell-value'), el => el.innerText || '')).filter(v => v.length)''')
+    disponiveis = [[valor_celula(v) for v in linha] for linha in linhas]
+    for rotulo, esperados in LINHAS_RELATORIOS[k].items():
+        linha = next((row.copy() for row in disponiveis if valor_celula(rotulo) in row), None)
+        if linha is None:
+            return False
+        for valor in map(valor_celula, esperados):
+            if valor not in linha:
+                return False
+            linha.remove(valor)
+    return True
 
 
 def portal_e_relatorios(pagina, k, relatorios):
@@ -281,6 +311,8 @@ def portal_e_relatorios(pagina, k, relatorios):
             elemento.scroll_into_view_if_needed(timeout=5000)
     aguardar(pagina, lambda q: dados_relatorio(q, k), 'Tabela incorporada sem cabeçalho e dados verificáveis.', 50)
     log(f'Relatório · {ROTAS[k]} · cabeçalho e células de dados conferidos no iframe do portal.')
+    if k in LINHAS_RELATORIOS:
+        log(f'Relatório · {ROTAS[k]} · valores de referência comparados por linha no iframe.')
     direto = url.urlsplit(relatorio)
     carregar(pagina, direto._replace(path=direto.path.replace('/embed/reporting/', '/reporting/')).geturl())
     aguardar(pagina, lambda q: dados_relatorio(q, k), 'Dados ausentes no relatório aberto diretamente.', 40)
