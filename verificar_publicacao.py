@@ -146,11 +146,15 @@ def aguardar(pagina, obter, mensagem, segundos=70):
     raise Falha(mensagem)
 
 
-def app_render(pagina, k, inicio=None):
+def quadro_dados(pagina):
     def tela(q):
         campo = q.get_by_role('textbox', name='Buscar nos registros')
         return q if campo.count() and campo.first.is_visible() else None
-    quadro = aguardar(pagina, tela, 'Interface com filtros não carregou.')
+    return aguardar(pagina, tela, 'Interface com filtros não carregou.')
+
+
+def app_render(pagina, k, inicio=None):
+    quadro = quadro_dados(pagina)
     quadro.locator('.panel.results tbody tr').first.wait_for(state='visible', timeout=35000)
     if inicio is not None:
         log(f'{ROTAS[k]} · da abertura da URL à primeira linha de dados visível: {time.monotonic()-inicio:.2f} s (navegador e rede).')
@@ -292,10 +296,66 @@ def portal_e_relatorios(pagina, k, relatorios):
     raise Falha('O botão Investigar não abriu o contexto de referência.')
 
 
+def conferir_recorte(pagina, ano, notas, montante):
+    quadro = quadro_dados(pagina)
+    detalhes = quadro.locator('details').filter(has_text='Consulta ao SQLite').first
+    if detalhes.get_attribute('open') is None:
+        detalhes.locator('summary').click(timeout=10000)
+    item = detalhes.locator('.figures > div').filter(has=quadro.get_by_text('Notas', exact=True))
+    exigir(item.locator('strong').inner_text(timeout=16000) == notas, 'Contagem alterada entre sessões.')
+    exigir(montante in detalhes.inner_text(), 'Montante alterado entre sessões.')
+    exigir(ano in detalhes.locator('p').inner_text(), 'Exercício discrepante no recorte.')
+    return quadro
+
+
+def sessoes_e_ficha(navegador):
+    ctx_a, ctx_b = (navegador.new_context(locale='pt-BR') for _ in range(2))
+    try:
+        a, b = ctx_a.new_page(), ctx_b.new_page()
+        base = app_url(endereco_app(), 'financeira')
+        # O segundo navegador inicia enquanto o primeiro ainda renderiza o componente.
+        a.goto(base + '&ano=2012', wait_until='commit')
+        b.goto(base + '&ano=2026', wait_until='commit')
+        conferir_recorte(a, '2012', '3', '6.426.809,42')
+        conferir_recorte(b, '2026', '117', '98.270.629,22')
+        log('Sessões simultâneas · 2012 e 2026 renderizaram as contagens e os montantes esperados no primeiro acesso.')
+        ficha = app_url(endereco_app(), 'juridica').replace('nivel=fichas','nivel=origem') + '&evento=GI%3A187'
+        carregar(a, ficha)
+        q = quadro_dados(a)
+        dialogo = q.get_by_role('dialog')
+        dialogo.get_by_role('heading', name='Ficha de evidência').wait_for(state='visible')
+        dialogo.get_by_role('heading', name='Origem da informação').wait_for(state='visible')
+        exigir('GI:187' in dialogo.locator('.idline').inner_text(), 'Identidade da ficha divergente.')
+        log('URL direta · ficha jurídica aberta com a origem documental e o identificador do piloto.')
+        a.go_back(wait_until='domcontentloaded', timeout=60000)
+        quadro = conferir_recorte(a, '2012', '3', '6.426.809,42')
+        log('URL direta da ficha jurídica GI:187 abriu com a origem. Voltar restaurou 2012 e os respectivos valores.')
+        campo = quadro.get_by_role('textbox', name='Buscar nos registros')
+        campo.fill('ZZZ-SMARTHOUSE-TESTE-SEM-OCORRENCIAS')
+        quadro.locator('.panel.results').get_by_text('Nenhum registro neste recorte', exact=True).wait_for(state='visible')
+        exigir(not quadro.locator('.panel.results tbody tr').count(), 'A seleção vazia exibiu linhas.')
+        conferir_recorte(b, '2026', '117', '98.270.629,22')
+        quadro.get_by_role('button', name='Limpar filtros').click()
+        quadro.locator('.panel.results tbody tr').first.wait_for(state='visible')
+        exigir(campo.input_value() == '', 'A busca não foi limpa.')
+        conferir_recorte(b, '2026', '117', '98.270.629,22')
+        log('Duas sessões anônimas simultâneas preservaram os recortes de 2012 (3 notas) e 2026 (117 notas). A busca vazia indicou ausência e voltou a exibir linhas após limpar.')
+    finally:
+        ctx_a.close()
+        ctx_b.close()
+
+
 def navegacao(testar_app, testar_portal, testar_relatorios):
     from playwright.sync_api import sync_playwright
     falhas = []
     with sync_playwright() as pw, pw.chromium.launch(channel='chrome', headless=True) as navegador:
+        if testar_app:
+            try:
+                sessoes_e_ficha(navegador)
+            except Exception as exc:
+                erro = str(exc) if isinstance(exc, Falha) else type(exc).__name__
+                log(f'Sessões concorrentes, URL direta, Voltar e busca vazia · falhou ({erro}).')
+                falhas.append('sessoes')
         if testar_portal or testar_relatorios:
             ctx = navegador.new_context(locale='pt-BR', viewport={'width':1360,'height':900})
             try:
