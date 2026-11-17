@@ -284,11 +284,20 @@ def portal_e_relatorios(pagina, k, relatorios):
     direto = url.urlsplit(relatorio)
     carregar(pagina, direto._replace(path=direto.path.replace('/embed/reporting/', '/reporting/')).geturl())
     aguardar(pagina, lambda q: dados_relatorio(q, k), 'Dados ausentes no relatório aberto diretamente.', 40)
+    log(f'Relatório · {ROTAS[k]} · cabeçalho e células de dados conferidos na abertura direta sem conta.')
     botao = aguardar(pagina, lambda q: botao_investigar(q, k), 'Botão Investigar ausente no relatório público.', 40)
     botao.click(timeout=10000)
     fim = time.monotonic() + 30
     while time.monotonic() < fim:
         for aba in pagina.context.pages:
+            atual = url.urlsplit(aba.url)
+            if atual.hostname == 'www.google.com' and atual.path == '/url' and destino_investigar(limpo(aba.url), k):
+                for link in aba.get_by_role('link').all():
+                    href = link.get_attribute('href') or ''
+                    if destino_investigar(href, k) and link.is_visible():
+                        link.click(timeout=10000)
+                        log(f'Investigar · {ROTAS[k]} · seguido o link para o contexto correto no aviso de redirecionamento do Google.')
+                        break
             if destino_investigar(aba.url, k):
                 app_render(aba, k)
                 return
