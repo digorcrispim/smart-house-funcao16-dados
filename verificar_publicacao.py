@@ -348,7 +348,40 @@ def portal_e_relatorios(pagina, k, relatorios):
     exigir(not pendentes, 'Etapas pendentes: ' + ', '.join(pendentes) + '.')
 
 
+def identidade_url(raw):
+    endereco = raw.strip().replace('\u200b', '')
+    # No texto ou no parâmetro do redirecionador, o endereço inteiro pode estar codificado.
+    for _ in range(2):
+        if not endereco.lower().startswith(('https%3a', 'https%253a')):
+            break
+        endereco = url.unquote(endereco)
+    partes = url.urlsplit(endereco)
+    return partes.scheme, partes.netloc, partes.path or '/', sorted(url.parse_qsl(partes.query,keep_blank_values=True)), partes.fragment
+
+
+def conferir_link_aviso(link, base, referencia):
+    texto = link.inner_text().strip()
+    rotulo_confere = identidade_url(texto) == referencia
+    atributo = link.get_attribute('href') or ''
+    href = url.urljoin(base, atributo)
+    alvo = url.urlsplit(href)
+    direto = bool(atributo.strip()) and identidade_url(href) == referencia
+    google = (alvo.scheme == 'https' and alvo.netloc in {'www.google.com','google.com','www.google.com.br'}
+              and alvo.path == '/url' and atributo.strip() and not atributo.lstrip().startswith('#'))
+    mapeado = False
+    if google:
+        parametros = url.parse_qs(alvo.query)
+        destinos = [valor for chave in ('q','url') for valor in parametros.get(chave,[])]
+        mapeado = bool(destinos) and all(identidade_url(valor) == referencia for valor in destinos)
+    classe = 'direto' if direto else 'Google /url' if google else 'outro'
+    return rotulo_confere, classe, bool(direto or (rotulo_confere and mapeado)), mapeado
+
+
 def seguir_clique(pagina, botao, k):
+    esperado = botao.get_attribute('href') or ''
+    exigir(destino_investigar(esperado, k), 'O botão de origem não expõe o destino autorizado.')
+    referencia = identidade_url(esperado)
+    seguiu = False
     original = pagina.url
     botao.click(timeout=10000)
     fim = time.monotonic() + 40
@@ -375,31 +408,36 @@ def seguir_clique(pagina, botao, k):
                 continue
             if host not in {'www.google.com', 'google.com', 'www.google.com.br','datastudio.google.com','lookerstudio.google.com'}:
                 continue
-            if (classe, 'classificar') not in vistos and aba.locator('body').count():
-                corpo = normal(aba.locator('body').inner_text(timeout=2500))
-                if corpo.strip():
-                    aviso = 'redirecion' in corpo or 'redirect' in corpo or 'previous page' in corpo
-                    consentimento = 'before you continue' in corpo or 'antes de continuar' in corpo
-                    desafio = 'unusual traffic' in corpo or 'trafego incomum' in corpo or 'captcha' in corpo
-                    links = aba.get_by_role('link').all()
-                    familias = []
-                    for l in links:
-                        d = url.urlsplit(l.get_attribute('href') or '')
-                        if d.hostname == url.urlsplit(PRODUCAO).hostname:
-                            keys = url.parse_qs(d.query)
-                            familias.append('destino Streamlit, critérios conferidos=' + str(destino_investigar(d.geturl(), k)) +
-                                            ', campos esperados=' + str(all(a in keys for a in ('contrato','trajetoria','nivel'))))
-                    log(f'Investigar · {ROTAS[k]} · aviso={aviso}, consentimento={consentimento}, verificação humana={desafio}, '
-                        f'{len(links)} links, {", ".join(familias) or "nenhum link direto para a aplicação"}.')
-                    vistos.add((classe, 'classificar'))
-                    if desafio:
-                        raise Falha('O Google solicitou verificação humana à sessão anônima no redirecionamento.')
-            for link in aba.get_by_role('link').all():
-                href = link.get_attribute('href') or ''
-                if destino_investigar(href, k) and link.is_visible():
+            if (classe, 'classificar') in vistos or not aba.locator('body').count():
+                continue
+            corpo = normal(aba.locator('body').inner_text(timeout=2500))
+            if not corpo.strip():
+                continue
+            aviso = 'redirecion' in corpo or 'redirect' in corpo or 'previous page' in corpo
+            consentimento = 'before you continue' in corpo or 'antes de continuar' in corpo
+            desafio = 'unusual traffic' in corpo or 'trafego incomum' in corpo or 'captcha' in corpo
+            links = aba.get_by_role('link').all()
+            if not links and not desafio:
+                continue
+            log(f'Investigar · {ROTAS[k]} · aviso={aviso}, consentimento={consentimento}, verificação humana={desafio}, {len(links)} links.')
+            vistos.add((classe, 'classificar'))
+            if desafio:
+                raise Falha('O Google solicitou verificação humana à sessão anônima no redirecionamento.')
+            if not aviso or seguiu:
+                continue
+            for numero, link in enumerate(links, 1):
+                if not link.is_visible():
+                    continue
+                rotulo_ok, formato, seguro, parametro_ok = conferir_link_aviso(link, aba.url, referencia)
+                log(f'Investigar · {ROTAS[k]} · link {numero}: texto corresponde ao destino={rotulo_ok}, '
+                    f'href={formato}, parâmetro q/url corresponde={parametro_ok}.')
+                if seguro:
                     link.click(timeout=10000)
-                    log(f'Investigar · {ROTAS[k]} · seguido o link do aviso para o contexto de referência.')
+                    seguiu = True
+                    log(f'Investigar · {ROTAS[k]} · clicado o link verificável do aviso para o contexto de referência.')
                     break
+            if not seguiu:
+                raise Falha('O aviso do Google não forneceu link verificável para o destino exibido no botão.')
         pagina.wait_for_timeout(350)
     raise Falha('O botão Investigar não abriu o contexto de referência.')
 
