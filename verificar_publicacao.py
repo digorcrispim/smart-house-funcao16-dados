@@ -501,7 +501,7 @@ def modalidade_urbanizacao(navegador):
             e=q.get_by_role('heading',name='Visão global do contrato',exact=True)
             return q if e.count() and e.is_visible() else None
         q=aguardar(pagina,achar,'Urbanização não carregou.',segundos=90)
-        texto=q.locator('body').inner_text()
+        texto=q.locator('.urban').inner_text()
         exigir(all(x in texto for x in ['330.827.714,40','45.069.065,49','169 notas únicas']), 'Valores globais 037 divergentes.')
         for i in range(100,106):
             exigir('1148.100.'+str(i)+'-u' in texto,'Sub-ID 037 ausente.')
@@ -525,6 +525,7 @@ def modalidade_urbanizacao(navegador):
         log('Quatro perspectivas · carteira, custos, território e história renderizaram com o mesmo contexto.')
         q.locator('.urbtrail').get_by_role('button',name='Física',exact=True).click()
         q.get_by_role('heading',name='Situação de cada intervenção',exact=True).wait_for(state='visible')
+        pagina.wait_for_url(re.compile(r'.*trajetoria=fisica.*'),timeout=15000)
         exigir('1148.100.101-u' in pagina.url and 'GI%3A98' in pagina.url,'Trajetória não conservou sub-ID/contrato.')
         log('Troca para trajetória Física preservou contrato e sub-ID na URL.')
         q.get_by_role('button',name='Caderno de análise',exact=True).click()
