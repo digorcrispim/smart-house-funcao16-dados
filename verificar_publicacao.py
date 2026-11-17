@@ -260,6 +260,8 @@ ROTULOS = {
 
 
 LINHAS_RELATORIOS = {
+    'juridica': {'Instrumento aditivo': ('12',), 'Publicação': ('9',)},
+    'institucional': {'Intervenção': ('25',), 'Unidade orçamentária': ('7',)},
     'financeira': {'2026': ('117', '98.270.629,22', '98.270.629,22')},
     'orcamentaria': {'2026': ('321', '2.393.369.118,98')},
     'territorial': {
@@ -306,20 +308,47 @@ def portal_e_relatorios(pagina, k, relatorios):
     relatorio = aguardar(pagina, link_relatorio, 'Referência ao relatório ausente no portal.', 25)
     if not relatorios:
         return
-    for elemento in pagina.locator('iframe').all():
-        if elemento.is_visible():
-            elemento.scroll_into_view_if_needed(timeout=5000)
-    aguardar(pagina, lambda q: dados_relatorio(q, k), 'Tabela incorporada sem cabeçalho e dados verificáveis.', 50)
-    log(f'Relatório · {ROTAS[k]} · cabeçalho e células de dados conferidos no iframe do portal.')
-    if k in LINHAS_RELATORIOS:
-        log(f'Relatório · {ROTAS[k]} · valores de referência comparados por linha no iframe.')
+    pendentes = []
+
+    def verificar(nome, operacao):
+        try:
+            operacao()
+            log(f'Relatório · {ROTAS[k]} · {nome} · verificado.')
+        except Exception as exc:
+            motivo = str(exc) if isinstance(exc, Falha) else type(exc).__name__
+            log(f'Relatório · {ROTAS[k]} · {nome} · pendente ({motivo}).')
+            pendentes.append(nome)
+
+    def incorporado():
+        for elemento in pagina.locator('iframe').all():
+            if elemento.is_visible():
+                elemento.scroll_into_view_if_needed(timeout=5000)
+        aguardar(pagina, lambda q: dados_relatorio(q, k), 'Cabeçalho ou valores de referência ausentes no iframe.', 50)
+
+    verificar('dados e valores no iframe', incorporado)
     direto = url.urlsplit(relatorio)
     carregar(pagina, direto._replace(path=direto.path.replace('/embed/reporting/', '/reporting/')).geturl())
-    aguardar(pagina, lambda q: dados_relatorio(q, k), 'Dados ausentes no relatório aberto diretamente.', 40)
-    log(f'Relatório · {ROTAS[k]} · cabeçalho e células de dados conferidos na abertura direta sem conta.')
-    botao = aguardar(pagina, lambda q: botao_investigar(q, k), 'Botão Investigar ausente no relatório público.', 40)
-    confirmado = destino_investigar(limpo(botao.get_attribute('href') or ''), k)
-    log(f'Investigar · {ROTAS[k]} · destino HTML conferido: {"sim" if confirmado else "rótulo clicável"}.')
+    verificar('dados e valores na abertura direta', lambda: aguardar(
+        pagina, lambda q: dados_relatorio(q, k), 'Cabeçalho ou valores de referência ausentes na abertura direta.', 40))
+    botao = aguardar(pagina, lambda q: botao_investigar(q, k), 'Botão Investigar ausente no relatório público.', 30)
+
+    def destino_isolado():
+        href = botao.get_attribute('href') or ''
+        exigir(destino_investigar(href, k), 'O href visível não corresponde ao contexto esperado.')
+        sessao = pagina.context.browser.new_context(locale='pt-BR', viewport={'width':1360,'height':900})
+        try:
+            outra = sessao.new_page()
+            carregar(outra, href)
+            app_render(outra, k)
+        finally:
+            sessao.close()
+
+    verificar('href do botão aberto diretamente em sessão anônima separada', destino_isolado)
+    verificar('clique físico Investigar até os registros do aplicativo', lambda: seguir_clique(pagina, botao, k))
+    exigir(not pendentes, 'Etapas pendentes: ' + ', '.join(pendentes) + '.')
+
+
+def seguir_clique(pagina, botao, k):
     original = pagina.url
     botao.click(timeout=10000)
     fim = time.monotonic() + 40
@@ -346,6 +375,25 @@ def portal_e_relatorios(pagina, k, relatorios):
                 continue
             if host not in {'www.google.com', 'google.com', 'www.google.com.br','datastudio.google.com','lookerstudio.google.com'}:
                 continue
+            if (classe, 'classificar') not in vistos and aba.locator('body').count():
+                corpo = normal(aba.locator('body').inner_text(timeout=2500))
+                if corpo.strip():
+                    aviso = 'redirecion' in corpo or 'redirect' in corpo or 'previous page' in corpo
+                    consentimento = 'before you continue' in corpo or 'antes de continuar' in corpo
+                    desafio = 'unusual traffic' in corpo or 'trafego incomum' in corpo or 'captcha' in corpo
+                    links = aba.get_by_role('link').all()
+                    familias = []
+                    for l in links:
+                        d = url.urlsplit(l.get_attribute('href') or '')
+                        if d.hostname == url.urlsplit(PRODUCAO).hostname:
+                            keys = url.parse_qs(d.query)
+                            familias.append('destino Streamlit, critérios conferidos=' + str(destino_investigar(d.geturl(), k)) +
+                                            ', campos esperados=' + str(all(a in keys for a in ('contrato','trajetoria','nivel'))))
+                    log(f'Investigar · {ROTAS[k]} · aviso={aviso}, consentimento={consentimento}, verificação humana={desafio}, '
+                        f'{len(links)} links, {", ".join(familias) or "nenhum link direto para a aplicação"}.')
+                    vistos.add((classe, 'classificar'))
+                    if desafio:
+                        raise Falha('O Google solicitou verificação humana à sessão anônima no redirecionamento.')
             for link in aba.get_by_role('link').all():
                 href = link.get_attribute('href') or ''
                 if destino_investigar(href, k) and link.is_visible():
