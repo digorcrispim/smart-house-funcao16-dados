@@ -146,12 +146,14 @@ def aguardar(pagina, obter, mensagem, segundos=70):
     raise Falha(mensagem)
 
 
-def app_render(pagina, k):
+def app_render(pagina, k, inicio=None):
     def tela(q):
         campo = q.get_by_role('textbox', name='Buscar nos registros')
         return q if campo.count() and campo.first.is_visible() else None
     quadro = aguardar(pagina, tela, 'Interface com filtros não carregou.')
     quadro.locator('.panel.results tbody tr').first.wait_for(state='visible', timeout=35000)
+    if inicio is not None:
+        log(f'{ROTAS[k]} · da abertura da URL à primeira linha de dados visível: {time.monotonic()-inicio:.2f} s (navegador e rede).')
     for tab, titulo in [('Linha do tempo', 'Linha do tempo documental'),
                         ('Matriz de relacionamentos', 'Matriz de relacionamentos')]:
         quadro.get_by_role('tab', name=tab, exact=True).click(timeout=15000)
@@ -252,8 +254,10 @@ def navegacao(testar_app, testar_portal, testar_relatorios):
                 try:
                     pagina = ctx.new_page()
                     if nome == 'Aplicativo':
-                        carregar(pagina, app_url(endereco_app(), k))
-                        app_render(pagina, k)
+                        endereco = app_url(endereco_app(), k)
+                        inicio = time.monotonic()
+                        carregar(pagina, endereco)
+                        app_render(pagina, k, inicio)
                     else:
                         portal_e_relatorios(pagina, k, testar_relatorios)
                     log(f'{nome} · {ROTAS[k]} · verificado em sessão nova.')
